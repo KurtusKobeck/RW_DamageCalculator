@@ -1,6 +1,5 @@
 #Rimworld Armor and Damage Tester
 import itertools
-import math
 
 #name       damage  Pen
 #Revolver   12      18
@@ -14,6 +13,7 @@ gunDict={"Revolver":(12,18),"AutoPistol":(10,15),"MachinePistol":(6,9),"PumpShot
 #print(Dict["Revolver"])
 #for gun in gunDict:
 #    print(gunDict[gun])
+qualDict={"Awful":0,"Poor":1,"Normal":2,"Good":3,"Excellent":4,"Mastework":5,"Legendary":6,0:"Awful",1:"Poor",2:"Normal",3:"Good",4:"Excellent",5:"Masterwork",6:"Legendary"}
 
 #In Rimworld, when a pawn is "hit", the game begins rolling RNG to determine where the pawn is going to be damaged.
 #A pawn is considered "hit" when a ranged attack accuracy check is passed by an attacker and is not blocked by cover
@@ -96,7 +96,7 @@ lesserTorsoRolls=[ribcage,pelvis,sternum]
 lesserArmRolls=[clavicles]
 bodyGroups=[deathRolls,organRolls,limbRolls,handfoodRolls,digitRolls,lesserTorsoRolls,lesserArmRolls]
 
-layerDict={"skin":100,"middle":200,"outer":300,"head":150}   #Add your custom layers here!
+layerDict={"dermalImplant":0,"contour":10,"skin":100,"middle":200,"outer":300,"head":150}   #Add your custom layers here!
 
 def charMapper(sharps): #Used for determining whether to use .sharps or .blunts, whether to use the ignore armor or partial block statistic and how much damage is dealt
     charMap=""
@@ -173,7 +173,7 @@ def gunPenetrate(armorLayers,bullet,health): #armorLayers is a list of tuples((s
     bluntResults=[]
     destructionChance=0
     expectedDamage=0
-    #print(armorLayers)
+    #print("Armor Layers \n "+str(armorLayers))
     for layer in armorLayers:
         sharpResults.append(processLayer(layer,bullet[1])[0])
         bluntResults.append(processLayer(layer,bullet[1])[1])
@@ -201,6 +201,8 @@ def gunPenetrate(armorLayers,bullet,health): #armorLayers is a list of tuples((s
         if(hitDamage>=health):
             desChance=invLerp("gun",((hitDamage-health)/health))
             destructionChance+=desChance*odds
+            if(destructionChance<0):
+                print("WTF??")
             hitDamage=((1-desChance)*(health-1))+(desChance*health)  #account for the damage reduction due to Overkill Protection (OKP)
             #!!!bonus damage to parent not accounted for here!!!
         expectedDamage+=hitDamage*odds
@@ -218,7 +220,7 @@ def processLayer(armorLayer,penetrationValue):#tuple of (sharp,blunt),int of pen
     if(aRs==100):
         pAs=0
     elif(aRs>50):
-        pAs=1-aRs
+        pAs=100-aRs
         pBs=0
     elif(aRs<0):
         pAs=0
@@ -226,6 +228,7 @@ def processLayer(armorLayer,penetrationValue):#tuple of (sharp,blunt),int of pen
     else:
         pAs=aRs
         pBs=100-(2*aRs)
+    #
     aRb=(armorLayer[1]-penetrationValue)/2
     if(aRb<0):
         aRb=0
@@ -234,7 +237,7 @@ def processLayer(armorLayer,penetrationValue):#tuple of (sharp,blunt),int of pen
     if(aRb==100):
         pAb=0
     elif(aRb>50):
-        pAb=1-aRb
+        pAb=100-aRb
         pBb=0
     elif(aRb<0):
         pAb=0
@@ -242,7 +245,7 @@ def processLayer(armorLayer,penetrationValue):#tuple of (sharp,blunt),int of pen
     else:
         pAb=aRb
         pBb=100-(2*aRb)
-    return [pAs/100,pBs/100],[pAb/100,pBb/100]
+    return [max(pAs/100,0),max(0,pBs/100)],[max(0,pAb/100),max(0,pBb/100)]
     #itertools.product([a,b],[c,d])
     #this function returns a list containing the ordered permutations of it's contents. (no double dipping within an order!)
     #Returns: ac, ad, bc, bd
@@ -259,22 +262,25 @@ class armor():
     def __str__(self):
         return str(self.coverage)+" "+str(self.sharp)+" "+str(self.blunt)+" "+str(self.wornLayer)+" "+str(self.wealth)
         
-class outfit(): #and outfit is a list of armors
-    def __init__(self,gear):
+class outfit(): #an outfit is a list of armors
+    def __init__(self,gear,name):
+        self.name=name
         wornLayers=[]
         self.gear=[]
         unsortedGear=[]
+        self.value=0
         for item in gear:
             #print("item: "+str(item))
             if(item.wornLayer==("middle","outer") or item.wornLayer==("outer","middle")):
+                canAdd=True
                 for element in item.wornLayer:
-                    #print("element: "+str(item))
+                    print("element: "+str(item.wornLayer))
                     if layerDict[element] in wornLayers:
                         print("layers overlap!")
-                        return
-                    else:
-                        wornLayers.append(element)
-                        unsortedGear.append((layerDict[element],item))
+                        canAdd=False
+                if canAdd:
+                    wornLayers.append(element)
+                    unsortedGear.append((layerDict[element],item))
                 #print(wornLayers)
             elif layerDict[item.wornLayer] in wornLayers:
                 print("layers overlap!")
@@ -283,8 +289,9 @@ class outfit(): #and outfit is a list of armors
                 wornLayers.append(item.wornLayer)
                 unsortedGear.append((layerDict[item.wornLayer],item))
                 #print(wornLayers)
+            self.value+=item.wealth
         #Now sort outer->inner
-        #print(unsortedGear)
+        print(unsortedGear)
         unsortedGear.sort(reverse=True)
         #print("gear: "+str(unsortedGear))
         for item in unsortedGear:
@@ -464,21 +471,76 @@ def evaluateOutfit(gun,outfit):
         #this is indestructible and has less HP than the arms, so dismemberment from this is impossible from bullets afaik.
         expectedDamage+=e*part[0]
         chanceToReceiveDamage+=c*part[0]
-    print(" death chance:                    "+str(deathChance)+
-          "\n organ destruction chance:        "+str(organLossChance)+
-          "\n limb destruction chance:         "+str(limbLossChance)+
-          "\n hand/foot destruction chance:    "+str(handLossChance)+
-          "\n fingers/toes destruction chance: "+str(digitLossChance)+
-          "\n expected damage:                 "+str(expectedDamage)+
-          "\n chance to receive damage:        " +str(chanceToReceiveDamage)+
-          "\n chance brain is damaged:         "+str(chanceBrainIsDamaged))
+    value=0
+    for layer in outfit.gear:
+        #print(layer)
+        value+=layer.wealth
+    if(verbosity):
+        print(" death chance:                   "+str(deathChance)+
+              "\n organ destruction chance:        "+str(organLossChance)+
+              "\n limb destruction chance:         "+str(limbLossChance)+
+              "\n hand/foot destruction chance:    "+str(handLossChance)+
+              "\n fingers/toes destruction chance: "+str(digitLossChance)+
+              "\n expected damage:                 "+str(expectedDamage/gun[0])+
+              "\n chance to receive damage:        " +str(chanceToReceiveDamage)+
+              "\n chance brain is damaged:         "+str(chanceBrainIsDamaged)+
+              "\n total wealth from the outfit:    "+str(value))
+    return [deathChance,organLossChance,limbLossChance,handLossChance,digitLossChance,expectedDamage/gun[0],chanceToReceiveDamage,chanceBrainIsDamaged,value]
+def evaluateOutfitWithQuality(gun,outfitI):
+    #Takes a tuple of gun bullet stats and an outfit object as inputs,
+    #and outputs a 7 value list of the results lists.
+    #i.e. [[1,2],[2,3],[3,4],[4,5],[5,6],[6,7],[7,8]] where each of those interior lists would be
+    #the results of running evaluateOutfit() on the same inputs.
+    #Scales sharp/blunt values & wealth by [bs,w] for each run.
+    #caps value gain as follows: [9999999,9999999,9999999,500,1000,2000,3000]
+    qualityScale=[[0.6,0.5,9999999],[0.8,0.75,9999999],[1,1,9999999],[1.15,1.25,500],[1.3,1.5,1000],[1.45,2.5,2000],[1.8,5,3000]]
+    outfitPerformanceAcrossQualities=[]
+    for qs in qualityScale:
+        qualGear=[]
+        for armorL in outfitI.gear:
+            #print("creating armor quality permutations: "+str(armorL))
+            if(qs==9999999):    #See? Its not a magic number, just a signal carrier! Totally different. 
+                qualGear.append(armor(armorL.wornLayer,armorL.sharp*qs[0],armorL.blunt*qs[0],armorL.coverage,armorL.wealth*qs[1]))
+            else:
+                qualGear.append(armor(armorL.wornLayer,armorL.sharp*qs[0],armorL.blunt*qs[0],armorL.coverage,min(armorL.wealth*qs[1],armorL.wealth+qs[2])))#Wealth gain is capped by quality. good+500,excellent+1000,masterwork+2000,legendary+3000.
+        #print("assembling oufits: "+str(qualGear))
+        qualFit=outfit((qualGear),outfitI.name)
+        outfitPerformanceAcrossQualities.append(evaluateOutfit(gun,qualFit))
+    #print("returning the results from all 7 quality variants: "+str(outfitPerformanceAcrossQualities))
+    return outfitPerformanceAcrossQualities
 
+def evaluateOutfits(gun,outfitI,quality):
+    #Takes a tuple of gun bullet stats, an outfit object and a zero-indexed integer 0-6 representing the quality to be compared at as inputs,
+    #and outputs a 7 value list of the results lists.
+    #i.e. [[1,2],[2,3],[3,4],[4,5],[5,6],[6,7],[7,8]] where each of those interior lists would be
+    #the results of running evaluateOutfit() on the same inputs.
+    #Scales sharp/blunt values & wealth by [bs,w] for each run.
+    #caps value gain as follows: [9999999,9999999,9999999,500,1000,2000,3000]
+    qualityScale=[[0.6,0.5,9999999],[0.8,0.75,9999999],[1,1,9999999],[1.15,1.25,500],[1.3,1.5,1000],[1.45,2.5,2000],[1.8,5,3000]]
+    outfitsPerformance=[]
+    for fit in outfitI:
+        qualGear=[]
+        qs=qualityScale[quality]
+        for armorL in fit.gear:
+            #print("creating armor quality permutations: "+str(armorL))
+            if(qs==9999999):    #See? Its not a magic number, just a signal carrier! Totally different. 
+                qualGear.append(armor(armorL.wornLayer,armorL.sharp*qs[0],armorL.blunt*qs[0],armorL.coverage,armorL.wealth*qs[1]))
+            else:
+                qualGear.append(armor(armorL.wornLayer,min(200,armorL.sharp*qs[0]),min(200,armorL.blunt*qs[0]),armorL.coverage,min(armorL.wealth*qs[1],armorL.wealth+qs[2])))#Wealth gain is capped by quality. good+500,excellent+1000,masterwork+2000,legendary+3000.
+        #print("assembling oufits: "+str(qualGear))
+        qualFit=outfit((qualGear),fit.name)
+        outfitsPerformance.append(evaluateOutfit(gun,qualFit))
+    return outfitsPerformance
+
+verbosity=False
 #SkinLayers
+clothShirtPants=armor("skin",7.2,0,["torso","neck","shoulders","arms","legs"],77+66)
 hyperweaveShirtPants=armor("skin",40,10.8,["torso","neck","shoulders","arms","legs"],415+365)
 devilstrandShirtPants=armor("skin",28,7.2,["torso","neck","shoulders","arms","legs"],255+225)
 #MiddleLayers
 flakVest=armor("middle",100,36,["torso","shoulders","neck"],225)
 #OuterLayers
+clothBandolier=armor("outer",3.6,0,["torso"],125)
 devilstrandDuster=armor("outer",42,10.8,["torso","shoulders","neck","arms","legs"],475)
 #HeadLayers
     #FlakHelmets
@@ -492,17 +554,26 @@ marineHelmet=armor("head",106,45,["head","eyes","ears","nose","jaw"],635)
 cataphractHelmet=armor("head",120,50,["head","eyes","ears","nose","jaw"],745)
 #Middle&OuterLayers
     #SpacerArmor
+steelPlateArmor=armor(("middle","outer"),65.7,32.9,["torso","neck","shoulders","arms","legs"],460)
+bioferritePlateArmor=armor(("middle","outer"),80.3,36.5,["torso","neck","shoulders","arms","legs"],470)
+plasteelPlateArmor=armor(("middle","outer"),83.2,40.2,["torso","neck","shoulders","arms","legs"],1830)
 reconArmor=armor(("middle","outer"),92,40,["torso","neck","shoulders","arms","legs"],1540)
 marineArmor=armor(("middle","outer"),106,45,["torso","neck","shoulders","arms","legs"],2035)
 cataphractArmor=armor(("middle","outer"),120,50,["torso","neck","shoulders","arms","legs"],3120)
 
-lesserFlakTrooper=outfit((flakVest,devilstrandDuster))
-flakTrooper=outfit((devilstrandShirtPants,flakVest,devilstrandDuster,steelFlakHelmet))
-flakTrooperMarineHelmet=outfit((devilstrandShirtPants,flakVest,devilstrandDuster,marineHelmet))
-premiumFlakTrooper=outfit((hyperweaveShirtPants,flakVest,devilstrandDuster))
-spaceMarine=outfit((devilstrandShirtPants,marineHelmet,marineArmor))
-spaceMarineNoPantsNoShirt=outfit((marineHelmet,marineArmor))
-nudist=outfit(())
+bioMan=outfit((clothShirtPants,bioferritePlateArmor,bioferriteFlakHelmet),"BioFerPlate&FlakHelm")
+flakMan=outfit((clothShirtPants,flakVest,steelFlakHelmet),"FlakVestSteelFlakHelm")
+flakManBioFerHelm=outfit((clothShirtPants,flakVest,bioferriteFlakHelmet),"FlakVestBffh")
+lesserFlakTrooper=outfit((clothShirtPants,flakVest,devilstrandDuster,steelFlakHelmet),"FvSfmDsd")
+flakTrooperLux=outfit((devilstrandShirtPants,flakVest,devilstrandDuster,steelFlakHelmet),"DevStdShirt&Pants&DusterFlakVestSteelFlakHelm")
+flakTrooper=outfit((clothShirtPants,flakVest,devilstrandDuster,steelFlakHelmet),"DsdFvSfm")
+flakTrooperB=outfit((clothShirtPants,flakVest,devilstrandDuster,bioferriteFlakHelmet),"DsdFvBffh")
+flakTrooperMarineHelmet=outfit((devilstrandShirtPants,flakVest,devilstrandDuster,marineHelmet),"DevStdShirt&PantsFlakTrooperWithMarineHelmet")
+premiumFlakTrooper=outfit((hyperweaveShirtPants,flakVest,devilstrandDuster),"HyprWvShirt&PantsFlakTrooper")
+spaceMarine=outfit((devilstrandShirtPants,marineHelmet,marineArmor),"DevStdShirt&PantsMarineArmor")
+spaceMarineNoPantsNoShirt=outfit((marineHelmet,marineArmor),"MarineArmor")
+sM=outfit((clothShirtPants,marineHelmet,marineArmor),"MarineArmor")
+nudist=outfit((),"Nudist")
 #print("SpaceMarineHeadProtection: "+str(spaceMarine.headCoverage))
 
 #print("destruction chance, expected damage, chance to receive damage "+str(gunPenetrate(lesserFlakTrooper.torsoCoverage,gunDict["Revolver"],40)))
@@ -528,25 +599,25 @@ nudist=outfit(())
 gunOfChoice="ChargeLance"
 print("\n\nNowTesting: "+gunOfChoice)
 print("\nNudist vs "+gunOfChoice)
-evaluateOutfit(gunDict[gunOfChoice],nudist)
+print(evaluateOutfit(gunDict[gunOfChoice],nudist))
 print("\nFlakTrooper vs "+gunOfChoice)
-evaluateOutfit(gunDict[gunOfChoice],flakTrooper)
+print(evaluateOutfit(gunDict[gunOfChoice],flakTrooper))
 print("\nFlakTrooperMarineHelmet vs "+gunOfChoice)
-evaluateOutfit(gunDict[gunOfChoice],flakTrooperMarineHelmet)
+print(evaluateOutfit(gunDict[gunOfChoice],flakTrooperMarineHelmet))
 print("\nSpaceMarineNoPantsNoShirt vs "+gunOfChoice)
-evaluateOutfit(gunDict[gunOfChoice],spaceMarineNoPantsNoShirt)
+print(evaluateOutfit(gunDict[gunOfChoice],spaceMarineNoPantsNoShirt))
 print("\nSpaceMarine vs "+gunOfChoice)
-evaluateOutfit(gunDict[gunOfChoice],spaceMarine)
+print(evaluateOutfit(gunDict[gunOfChoice],spaceMarine))
 gunOfChoice="Revolver"
 print("\n\nNowTesting: "+gunOfChoice)
 print("\nNudist vs "+gunOfChoice)
-evaluateOutfit(gunDict[gunOfChoice],nudist)
+print(evaluateOutfit(gunDict[gunOfChoice],nudist))
 print("\nFlakTrooper vs "+gunOfChoice)
-evaluateOutfit(gunDict[gunOfChoice],flakTrooper)
+print(evaluateOutfit(gunDict[gunOfChoice],flakTrooper))
 print("\nFlakTrooperMarineHelmet vs "+gunOfChoice)
-evaluateOutfit(gunDict[gunOfChoice],flakTrooperMarineHelmet)
+print(evaluateOutfit(gunDict[gunOfChoice],flakTrooperMarineHelmet))
 print("\nSpaceMarineNoPantsNoShirt vs "+gunOfChoice)
-evaluateOutfit(gunDict[gunOfChoice],spaceMarineNoPantsNoShirt)
+print(evaluateOutfit(gunDict[gunOfChoice],spaceMarineNoPantsNoShirt))
 print("\nSpaceMarine vs "+gunOfChoice)
-evaluateOutfit(gunDict[gunOfChoice],spaceMarine)
+print(evaluateOutfit(gunDict[gunOfChoice],spaceMarine))
 
